@@ -5,7 +5,7 @@ error notInvestor();
 error notCorrectName();
 
 contract RegistarInvestor {
-    address private i_owner;
+    address private immutable i_owner;
 
     constructor() {
         i_owner = msg.sender;

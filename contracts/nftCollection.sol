@@ -6,42 +6,17 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract BasicNft is ERC721, Ownable {
     uint256 private s_tokenCounter;
-    mapping(bytes32 => bool) public tokenIds;
-    mapping(address => uint256[]) public tokensByAddress;
+    // example TOKEN_URI
+    string public constant TOKEN_URI =
+        "ipfs://bafybeig37ioir76s7mg5oobetncojcm3c3hxasyd4rvid4jqhy4gkaheg4/?filename=0-PUG.json";
 
     constructor() ERC721("ARNO", "ARN") {
-        uint256 tokenId = uint256(keccak256(abi.encodePacked(block.timestamp, msg.sender))) %
-            100000;
-        _safeMint(msg.sender, tokenId);
-        tokenIds[bytes32(tokenId)] = true;
-        tokensByAddress[msg.sender].push(tokenId);
-        s_tokenCounter = 1;
+        s_tokenCounter = 0;
     }
 
     function safeMint() public {
-        uint256 tokenId = uint256(keccak256(abi.encodePacked(block.timestamp, msg.sender))) %
-            100000;
-        _safeMint(msg.sender, tokenId);
-        tokenIds[bytes32(tokenId)] = true;
-        tokensByAddress[msg.sender].push(tokenId);
         s_tokenCounter = s_tokenCounter + 1;
-    }
-
-    function getTokenIds(address _owner) public view returns (uint256[] memory) {
-        return tokensByAddress[_owner];
-    }
-
-    function updateInfo(address from, address to, uint256 tokenId) public {
-        require(tokenIds[bytes32(tokenId)], "Token ID not found");
-        require(ownerOf(tokenId) == from, "Only the owner can transfer the NFT");
-        uint256[] storage fromTokens = tokensByAddress[from];
-        for (uint256 i = 0; i < fromTokens.length; i++) {
-            if (fromTokens[i] == tokenId) {
-                fromTokens[i] = fromTokens[fromTokens.length - 1];
-                fromTokens.pop();
-            }
-        }
-        tokensByAddress[to].push(tokenId);
+        _safeMint(msg.sender, s_tokenCounter);
     }
 
     function getTokenCounter() public view returns (uint256) {
@@ -49,12 +24,16 @@ contract BasicNft is ERC721, Ownable {
     }
 
     function transferNft(address from, address _to, uint256 _tokenId) public {
-        updateInfo(from, _to, _tokenId);
         safeTransferFrom(from, _to, _tokenId);
     }
 
     function ownerOfNft(uint256 tokenId) public view returns (address) {
         return ownerOf(tokenId);
+    }
+
+    function tokenURI(uint256 tokenId) public pure override returns (string memory) {
+        // require(_exists(tokenId), "ERC721Metadata: URI query for nonexistent token");
+        return TOKEN_URI;
     }
 
     function giveApproval(address to, uint256 tokenId) public {

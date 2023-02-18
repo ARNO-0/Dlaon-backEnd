@@ -20,8 +20,8 @@ library TimeStampHelper {
     }
 }
 
-contract loanDapp is IERC721Receiver {
-    BasicNft public erc721;
+contract LoanDapp is IERC721Receiver {
+    BasicNft public immutable erc721;
     address private immutable i_owner;
 
     constructor(address _nftAddress) {
@@ -32,7 +32,7 @@ contract loanDapp is IERC721Receiver {
 
     // Events
     event LoanApplied(
-        address borrower,
+        address indexed borrower,
         uint256 loanId,
         uint256 amount,
         uint256 dueDate,
@@ -109,7 +109,7 @@ contract loanDapp is IERC721Receiver {
 
     mapping(address => mapping(uint256 => Borrower)) BorrowerInfoMap;
     mapping(address => uint256) BorrowerLoanCountMap;
-    mapping(uint256 => bool) collateralVerifyMap;
+    mapping(uint256 => bool) public collateralVerifyMap;
 
     LenderProposal[] private LenderProposalArray;
     borrowerDetails[] public borrowerDetailsArray;
@@ -160,6 +160,13 @@ contract loanDapp is IERC721Receiver {
         );
         // Transfer the NFT to the contract
         erc721.transferNft(msg.sender, address(this), _collateral);
+        emit LoanApplied(
+            msg.sender,
+            BorrowerLoanCountMap[msg.sender],
+            _amount,
+            _DueDate,
+            _collateral
+        );
     }
 
     function NewProposal(
@@ -196,7 +203,11 @@ contract loanDapp is IERC721Receiver {
     }
 
     function AcceptProposal(uint256 _loanId, address _Lender) public {
-        if (BorrowerInfoMap[msg.sender][_loanId].state == loanState.accepting) {
+        require(BorrowerLoanCountMap[msg.sender] > 0, "loan not active");
+        if (
+            BorrowerInfoMap[msg.sender][_loanId].state == loanState.accepting &&
+            BorrowerInfoMap[msg.sender][_loanId].loanId == _loanId
+        ) {
             for (uint i = 0; i < LenderProposalArray.length; i++) {
                 if (
                     msg.sender == LenderProposalArray[i].AddressofBorrower &&
@@ -208,13 +219,13 @@ contract loanDapp is IERC721Receiver {
                             "proposal already accepted or invalid"
                         );
                         Borrower storage borrower = BorrowerInfoMap[msg.sender][_loanId];
-
+                        LenderProposalArray[i].state = proposalState.awaitingFinalAcceptance;
                         LenderProposalArray[i].dueDate = borrower.dueDate;
                         borrower.amount = LenderProposalArray[i].amount;
-                        LenderProposalArray[i].state = proposalState.awaitingFinalAcceptance;
+
                         borrower.state = loanState.awaitingFinalAcceptance;
                         borrower.rate = LenderProposalArray[i].rate;
-                        bool status = updateState(msg.sender, 1);
+                        bool status = updateState(msg.sender, 1, LenderProposalArray[i].amount);
                         require(status, "failed to update array");
                         continue;
                     }
@@ -245,27 +256,29 @@ contract loanDapp is IERC721Receiver {
     }
 
     function LockLoan(uint256 _loanId) public {
-        if (BorrowerInfoMap[msg.sender][_loanId].state == loanState.awaitingFinalAcceptance) {
+        require(BorrowerLoanCountMap[msg.sender] > 0, "loan not active");
+        if (
+            BorrowerInfoMap[msg.sender][_loanId].state == loanState.awaitingFinalAcceptance &&
+            BorrowerInfoMap[msg.sender][_loanId].loanId == _loanId
+        ) {
+            Borrower storage borrower = BorrowerInfoMap[msg.sender][_loanId];
+            borrower.state = loanState.successful;
+            borrower.Dayspassed = block.timestamp;
+            bool status = updateState(msg.sender, 2, 0);
+            require(status, "update failed at lock loan");
             for (uint256 i = 0; i < LenderProposalArray.length; i++) {
                 if (
                     msg.sender == LenderProposalArray[i].AddressofBorrower &&
                     LenderProposalArray[i].state == proposalState.awaitingFinalAcceptance &&
                     _loanId == LenderProposalArray[i].loanId
                 ) {
+                    LenderProposalArray[i].state = proposalState.accepted;
                     (bool sent, ) = payable(msg.sender).call{value: LenderProposalArray[i].amount}(
                         ""
                     );
                     require(sent, "Failed to send Ether");
-
-                    LenderProposalArray[i].state = proposalState.accepted;
                 }
             }
-
-            Borrower storage borrower = BorrowerInfoMap[msg.sender][_loanId];
-            borrower.state = loanState.successful;
-            borrower.Dayspassed = block.timestamp;
-            bool status = updateState(msg.sender, 2);
-            require(status, "update failed at lock loan");
         } else {
             revert InvalidLoanId();
         }
@@ -282,8 +295,8 @@ contract loanDapp is IERC721Receiver {
 
             uint256 _hours = TimeStampHelper.getHour(block.timestamp, borrower.Dayspassed);
 
-            uint256 value = getRepayAmount(borrower.rate, borrower.amount, _hours);
-
+            uint256 value = _getRepayAmount(borrower.rate, borrower.amount, _hours);
+            require(msg.value >= value, "send more ether");
             require(_amount >= value, "Enter correct amount");
 
             uint256 RemainAmount = _amount - value;
@@ -295,16 +308,16 @@ contract loanDapp is IERC721Receiver {
                     LenderProposalArray[i].state == proposalState.accepted
                 ) {
                     address payable _to = LenderProposalArray[i].Lender;
+                    LenderProposalArray[i].state = proposalState.Repaid;
+                    borrower.state = loanState.Repaid;
+                    bool status = updateState(msg.sender, 3, 0);
+                    require(status, "update failed at repay loan");
                     (bool sent, ) = _to.call{value: value}("");
                     require(sent, "Failed to send Ether to lender");
 
                     (bool sentt, ) = msg.sender.call{value: RemainAmount}("");
                     require(sentt, "Failed to send Ether");
 
-                    LenderProposalArray[i].state = proposalState.Repaid;
-                    borrower.state = loanState.Repaid;
-                    bool status = updateState(msg.sender, 3);
-                    require(status, "update failed at repay loan");
                     // tranfer nft back to borrower
 
                     erc721.transferNft(address(this), msg.sender, borrower.collateral);
@@ -324,10 +337,11 @@ contract loanDapp is IERC721Receiver {
      *
      */
 
-    function liqBorrower(uint256 _loanId, address _address) public {
+    function liqBorrower(uint256 _loanId, address _address) external returns (bool) {
         Borrower storage borrower = BorrowerInfoMap[_address][_loanId];
         uint256 _hours = TimeStampHelper.getHour(block.timestamp, borrower.Dayspassed);
         uint256 Days = _hours / 24;
+
         if (borrower.state == loanState.successful && Days > borrower.dueDate) {
             for (uint256 i = 0; i < LenderProposalArray.length; i++) {
                 if (
@@ -335,24 +349,31 @@ contract loanDapp is IERC721Receiver {
                     _loanId == LenderProposalArray[i].loanId &&
                     Days > LenderProposalArray[i].dueDate &&
                     LenderProposalArray[i].AddressofBorrower == borrower.AddressofBorrower &&
-                    borrower.state != loanState.Repaid &&
+                    borrower.state == loanState.successful &&
                     Days > borrower.dueDate
                 ) {
-                    erc721.transferNft(address(this), msg.sender, borrower.collateral);
                     borrower.state = loanState.liquidated;
-                    bool status = updateState(msg.sender, 4);
+                    bool status = updateState(borrower.AddressofBorrower, 4, 0);
                     require(status, "update failed at liqBorrower");
-                    borrower.collateral = 0;
+
                     collateralVerifyMap[borrower.collateral] = false;
                     LenderProposalArray[i].state = proposalState.liquidated;
+                    erc721.transferNft(address(this), msg.sender, borrower.collateral);
+                    borrower.collateral = 0;
+                    return true;
                 }
             }
         } else {
             revert InvalidAction();
         }
+        return false;
     }
 
-    function updateState(address _address, uint256 num) internal returns (bool status) {
+    function updateState(
+        address _address,
+        uint256 num,
+        uint256 _amount
+    ) internal returns (bool status) {
         for (uint i = 0; i < borrowerDetailsArray.length; i++) {
             if (
                 borrowerDetailsArray[i].AddressofBorrower == _address &&
@@ -360,6 +381,7 @@ contract loanDapp is IERC721Receiver {
                 num == 1
             ) {
                 borrowerDetailsArray[i].state = loanState.awaitingFinalAcceptance;
+                borrowerDetailsArray[i].amount = _amount;
                 return true;
             }
             if (
@@ -389,9 +411,11 @@ contract loanDapp is IERC721Receiver {
         }
     }
 
-    // getter functions
-
-    function getRepayAmount(
+    /**
+     * getter functions
+     *
+     * Interest is provided on monthly basis but is calculated on hourly basis*/
+    function _getRepayAmount(
         uint256 _rate,
         uint256 _amounttoPay,
         uint256 _hours
@@ -399,6 +423,21 @@ contract loanDapp is IERC721Receiver {
         uint256 interest = (_rate * _hours * _amounttoPay) / 72000;
         uint256 amount = interest + _amounttoPay;
         return amount;
+    }
+
+    function getRepayAmount(uint256 _LoanId) external view returns (uint256) {
+        Borrower storage borrower = BorrowerInfoMap[msg.sender][_LoanId];
+        if (borrower.state != loanState.successful) {
+            revert InvalidLoan();
+        }
+        uint Hours = TimeStampHelper.getHour(block.timestamp, borrower.Dayspassed);
+        if (Hours >= 24) {
+            uint256 value = _getRepayAmount(borrower.rate, borrower.amount, Hours);
+
+            return value;
+        } else {
+            revert waitForOneDay();
+        }
     }
 
     function displayBorrowerLoans(
@@ -542,6 +581,10 @@ contract loanDapp is IERC721Receiver {
 
     function getCurrentTimeStamp() public view returns (uint) {
         return block.timestamp;
+    }
+
+    function getOwner() public view returns (address) {
+        return i_owner;
     }
 
     receive() external payable {}

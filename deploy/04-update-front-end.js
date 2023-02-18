@@ -3,7 +3,7 @@ const fs = require("fs")
 const { network } = require("hardhat")
 
 module.exports = async () => {
-    if (process.env.UPDATE_FRONT_END) {
+    if (process.env.UPDATE_FRONT_END == "true") {
         //console.log("Writing to front end...")
 
         console.log("----------------------------------------------------")
@@ -36,7 +36,7 @@ module.exports = async () => {
 async function updateAbi() {
     const basicNft = await ethers.getContract("BasicNft")
     const registarInvestor = await ethers.getContract("RegistarInvestor")
-    const loanDapp = await ethers.getContract("loanDapp")
+    const loanDapp = await ethers.getContract("LoanDapp")
 
     const abis = JSON.parse(fs.readFileSync(frontEndAbiFile, "utf8"))
     abis["BasicNftabi"] = {
@@ -59,7 +59,7 @@ async function updateContractAddresses() {
     const RegistarInvestor = await ethers.getContract("RegistarInvestor")
     const basicNft = await ethers.getContract("BasicNft")
 
-    const loanDapp = await ethers.getContract("loanDapp")
+    const loanDapp = await ethers.getContract("LoanDapp")
 
     const contractAddresses = JSON.parse(fs.readFileSync(frontEndContractsFile, "utf8"))
     if (network.config.chainId.toString() in contractAddresses) {

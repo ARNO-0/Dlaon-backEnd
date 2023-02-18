@@ -12,10 +12,10 @@ module.exports = async ({ getNamedAccounts, deployments }) => {
     log("----------------------------------------------------")
     log("Deploying loanDapp and waiting for confirmations...")
 
-    const basicNft = await ethers.getContract("BasicNft")
+    const basicNft = await ethers.getContract("BasicNft", deployer)
     const nftAddress = basicNft.address
 
-    const loanDapp = await deploy("loanDapp", {
+    const loanDapp = await deploy("LoanDapp", {
         from: deployer,
         args: [nftAddress],
         log: true,
@@ -26,6 +26,7 @@ module.exports = async ({ getNamedAccounts, deployments }) => {
 
     log("----------------------------------------------------")
     log("Approving contract address for nft")
+
     await basicNft.setApprovalForAll(loanDapp.address, true)
     log("Approved")
 }
